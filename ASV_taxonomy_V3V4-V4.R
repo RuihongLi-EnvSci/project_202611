@@ -1,6 +1,6 @@
 
 # ============================================================
-# Batch SRA Processing Pipeline
+# Batch SRA Analysis Pipeline
 # Windows + SRA Toolkit + DADA2 + SILVA v138.2
 #
 # Workflow:
@@ -22,20 +22,20 @@
 #  ↓
 # Chimera removal
 #  ↓
-# V4 region extraction
+# Unified V4 region extraction
 #  ↓
-# Collapsing identical V4 sequences
+# Collapse identical V4 sequences
 #  ↓
-# Taxonomic assignment with SILVA v138.2
+# SILVA v138.2 taxonomic assignment
 #  ↓
 # Genus-level abundance and relative abundance
 #  ↓
-# PICRUSt2 input files
+# PICRUSt2 input generation
 #
 
 # Output structure:
-# One output directory per SRA sample.
-# All outputs are written directly to the sample directory.
+# One output directory per SRA file
+# All results are saved directly in the sample directory
 # ============================================================
 
 
@@ -43,7 +43,7 @@
 # 0. Configuration
 # ============================================================
 
-# Root directory containing SRA files.
+# Root directory containing SRA files
 input_root <- "C:/Users/Ruihong/Desktop/gut-microbiota/SRA_data"
 
 # SRA Toolkit
@@ -74,7 +74,7 @@ if (is.na(available_cores)) {
   available_cores <- 4L
 }
 
-# Use up to 8 threads while reserving one logical core.
+# Use up to 8 threads while reserving one logical core
 DADA_THREADS <- as.integer(
   max(
     1,
@@ -88,16 +88,16 @@ DADA_THREADS <- as.integer(
 # Windows filtering configuration
 FILTER_MULTITHREAD <- FALSE
 
-# OMP is used only by filterAndTrim.
+# Applied only to filterAndTrim
 FILTER_OMP <- TRUE
 
-# FASTQ filtering chunk size.
+# FASTQ filtering chunk size
 FILTER_CHUNK_SIZE <- 100000L
 
-# FASTQ dereplication chunk size.
+# FASTQ dereplication chunk size
 DEREP_CHUNK_SIZE <- 1000000L
 
-# Maximum number of bases used for error-rate learning.
+# Maximum number of bases used for error-rate learning
 ERROR_NBASES <- 1e8
 
 
@@ -111,7 +111,7 @@ MAX_N <- 0
 
 TRUNC_Q <- 2
 
-# Retain full read lengths (no truncation).
+# Disable sequence truncation
 TRUNC_LEN <- c(0, 0)
 
 
@@ -119,8 +119,8 @@ TRUNC_LEN <- c(0, 0)
 # V4 extraction parameters
 # ------------------------------------------------------------
 
-# Primer-based V4 extraction using the 515F/806R pair.
-# Primer sequences should match the amplicon-specific primers.
+# V4 extraction uses the 515F/806R primer pair
+# Primer sequences must match the amplicon primers
 
 PRIMER_515F <- "GTGYCAGCMGCCGCGGTAA"
 
@@ -136,28 +136,29 @@ V4_WARNING_RETENTION <- 90
 
 
 # ------------------------------------------------------------
-# Batch processing options
+# Batch processing parameters
 # ------------------------------------------------------------
 
-# TEST_ONLY controls single-sample versus full-batch processing.
+# Enable single-sample test mode for an initial run
+# Disable after validation to process all SRA files
 
 TEST_ONLY <- FALSE
 
 TEST_SRA_ID <- "11_Ctrl_1_ERR11788629"
 
-# Skip samples with complete output files.
+# Skip samples with complete results
 SKIP_COMPLETED <- TRUE
 
-# FALSE: remove FASTQ and filtered files after successful processing.
-# TRUE: retain FASTQ and filtered files.
+# FALSE: remove FASTQ and filtered files after successful processing
+# TRUE: retain FASTQ and filtered files
 KEEP_INTERMEDIATE_FILES <- FALSE
 
 
 # ============================================================
-# 1. Install required R packages
+# 1. Check and install required R packages
 # ============================================================
 
-cat("\n检查必要的 R 包...\n")
+cat("\nChecking required R packages...\n")
 
 if (!requireNamespace(
   "BiocManager",
@@ -188,7 +189,7 @@ missing_packages <- required_packages[
 if (length(missing_packages) > 0) {
   
   cat(
-    "需要安装：",
+    "Packages to install: ",
     paste(missing_packages, collapse = ", "),
     "\n"
   )
@@ -201,7 +202,7 @@ if (length(missing_packages) > 0) {
   
 } else {
   
-  cat("必要的 R 包已经安装。\n")
+  cat("All required R packages are already installed.\n")
   
 }
 
@@ -213,21 +214,21 @@ suppressPackageStartupMessages({
   
 })
 
-# Configure the OpenMP environment.
+# Configure the OpenMP environment
 Sys.setenv(
   OMP_NUM_THREADS = DADA_THREADS
 )
 
-cat("\nCPU 设置：\n")
+cat("\nCPU configuration:\n")
 
 cat(
-  "逻辑核心数：",
+  "Logical cores: ",
   available_cores,
   "\n"
 )
 
 cat(
-  "DADA2 线程数：",
+  "DADA2 threads: ",
   DADA_THREADS,
   "\n"
 )
@@ -238,26 +239,26 @@ cat(
 # ============================================================
 
 if (!dir.exists(input_root)) {
-  stop("SRA 总目录不存在！")
+  stop("The root SRA directory does not exist.")
 }
 
 if (!file.exists(fastq_dump_path)) {
-  stop("找不到 fastq-dump-orig.exe！")
+  stop("fastq-dump-orig.exe was not found.")
 }
 
 if (!file.exists(silva_genus)) {
-  stop("找不到 SILVA v138.2 数据库！")
+  stop("The SILVA v138.2 reference database was not found.")
 }
 
-cat("\nSRA 转换程序：\n")
+cat("\nSRA conversion executable:\n")
 cat(fastq_dump_path, "\n")
 
-cat("\nSILVA 数据库：\n")
+cat("\nSILVA database:\n")
 cat(silva_genus, "\n")
 
 
 # ============================================================
-# 3. Define the FASTQ discovery function
+# 3. Define the FASTQ search function
 # ============================================================
 
 find_fastq <- function(sample_dir, mate) {
@@ -298,7 +299,7 @@ find_fastq <- function(sample_dir, mate) {
     mustWork = FALSE
   )
   
-  # Prefer FASTQ files in the sample directory root.
+  # Prefer FASTQ files in the sample directory root
   root_files <- files[
     file_dirs == root_path
   ]
@@ -310,20 +311,20 @@ find_fastq <- function(sample_dir, mate) {
   if (length(root_files) > 1) {
     stop(
       paste(
-        "发现多个正向或反向 FASTQ 文件：",
+        "Multiple FASTQ files were found for mate:",
         mate
       )
     )
   }
   
-  # Support FASTQ files in legacy subdirectories.
+  # Support legacy FASTQ subdirectories
   if (length(files) == 1) {
     return(files)
   }
   
   stop(
     paste(
-      "发现多个无法区分的 FASTQ 文件：",
+      "Multiple ambiguous FASTQ files were found for mate:",
       mate
     )
   )
@@ -332,7 +333,7 @@ find_fastq <- function(sample_dir, mate) {
 
 
 # ============================================================
-# 4. Validate paired-end FASTQ files
+# 4. Validate FASTQ input files
 # ============================================================
 
 valid_fastq_pair <- function(fnF, fnR) {
@@ -371,7 +372,7 @@ valid_fastq_pair <- function(fnF, fnR) {
 
 
 # ============================================================
-# 5. Define V4 primers
+# 5. Configure V4 primers
 # ============================================================
 
 primer_515F <- DNAString(
@@ -397,7 +398,7 @@ extract_V4 <- function(sequence) {
     toupper(sequence)
   )
   
-  # Locate the 515F primer.
+  # Locate the 515F primer
   hits_F <- matchPattern(
     
     primer_515F,
@@ -412,7 +413,7 @@ extract_V4 <- function(sequence) {
     
   )
   
-  # Locate the reverse complement of the 806R primer.
+  # Locate the reverse complement of the 806R primer
   hits_R <- matchPattern(
     
     primer_806R_rc,
@@ -440,7 +441,7 @@ extract_V4 <- function(sequence) {
   
   r_start <- start(hits_R)
   
-  # Generate candidate forward/reverse primer pairs.
+  # Pair forward- and reverse-primer positions
   pairs <- expand.grid(
     
     fi = seq_along(f_end),
@@ -449,7 +450,7 @@ extract_V4 <- function(sequence) {
     
   )
   
-  # Retain pairs with the forward primer upstream of the reverse primer.
+  # Require the forward primer to precede the reverse primer
   pairs <- pairs[
     
     f_end[pairs$fi] < r_start[pairs$ri],
@@ -472,7 +473,7 @@ extract_V4 <- function(sequence) {
     insert_end - insert_start + 1
   )
   
-  # Retain sequences within the expected V4 length range.
+  # Retain sequences within the expected V4 length range
   valid <- which(
     
     insert_length >= V4_MIN_LENGTH &
@@ -485,7 +486,7 @@ extract_V4 <- function(sequence) {
     return(NA_character_)
   }
   
-  # Select the region closest to 250 bp.
+  # Select the region closest to 250 bp
   best <- valid[
     which.min(
       abs(
@@ -510,7 +511,7 @@ extract_V4 <- function(sequence) {
 
 
 # ============================================================
-# 7. Identify completed samples
+# 7. Check sample completion status
 # ============================================================
 
 is_sample_completed <- function(sample_dir) {
@@ -561,7 +562,7 @@ is_sample_completed <- function(sample_dir) {
 
 
 # ============================================================
-# 8. Process an individual SRA sample
+# 8. Define the per-SRA processing function
 # ============================================================
 
 process_one_sra <- function(sra_file) {
@@ -570,7 +571,7 @@ process_one_sra <- function(sra_file) {
     basename(sra_file)
   )
   
-  # Create one output directory per SRA sample.
+  # Create one output directory per SRA file
   sample_dir <- file.path(
     dirname(sra_file),
     sra_id
@@ -593,7 +594,7 @@ process_one_sra <- function(sra_file) {
   ) {
     
     cat(
-      "\n完整结果已经存在，跳过：",
+      "\nComplete results already exist; skipping: ",
       sra_id,
       "\n"
     )
@@ -620,7 +621,7 @@ process_one_sra <- function(sra_file) {
         
         output_dir = sample_dir,
         
-        message = "完整结果已经存在"
+        message = "Complete results already exist."
         
       )
       
@@ -643,7 +644,7 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  # Remove any previous completion marker before processing.
+  # Remove the previous success marker before reprocessing
   if (file.exists(success_marker)) {
     file.remove(success_marker)
   }
@@ -651,11 +652,11 @@ process_one_sra <- function(sra_file) {
   cat("\n")
   cat("====================================================\n")
   
-  cat("开始处理：", sra_id, "\n")
+  cat("Processing: ", sra_id, "\n")
   
-  cat("SRA 文件：", sra_file, "\n")
+  cat("SRA file: ", sra_file, "\n")
   
-  cat("结果目录：", sample_dir, "\n")
+  cat("Output directory: ", sample_dir, "\n")
   
   cat("====================================================\n")
   
@@ -664,7 +665,7 @@ process_one_sra <- function(sra_file) {
   # 8.3 Convert SRA to FASTQ
   # ----------------------------------------------------------
   
-  cat("\n检查 FASTQ 文件...\n")
+  cat("\nChecking FASTQ files...\n")
   
   fnF <- find_fastq(
     sample_dir,
@@ -678,9 +679,9 @@ process_one_sra <- function(sra_file) {
   
   if (!valid_fastq_pair(fnF, fnR)) {
     
-    cat("\n需要转换 SRA 为 FASTQ...\n")
+    cat("\nConverting SRA to FASTQ...\n")
     
-    # Remove incomplete FASTQ files from previous runs.
+    # Remove incomplete FASTQ files from previous attempts
     old_fastq <- list.files(
       
       sample_dir,
@@ -719,7 +720,7 @@ process_one_sra <- function(sra_file) {
       
     )
     
-    # Use fastq-dump-orig.exe for SRA conversion.
+    # Use fastq-dump-orig.exe explicitly
     cmd <- paste(
       
       shQuote(
@@ -743,7 +744,7 @@ process_one_sra <- function(sra_file) {
       
     )
     
-    cat("\n执行命令：\n")
+    cat("\nExecuting command:\n")
     cat(cmd, "\n")
     
     dump_status <- system(
@@ -765,19 +766,19 @@ process_one_sra <- function(sra_file) {
       dump_status != 0
     ) {
       
-      stop("fastq-dump-orig.exe 转换失败！")
+      stop("fastq-dump-orig.exe conversion failed.")
       
     }
     
   } else {
     
-    cat("\n发现已有完整 FASTQ，跳过转换。\n")
+    cat("\nComplete FASTQ files already exist; skipping conversion.\n")
     
   }
   
   
   # ----------------------------------------------------------
-  # 8.4 Revalidate FASTQ files
+  # 8.4 Validate FASTQ files
   # ----------------------------------------------------------
   
   fnF <- find_fastq(
@@ -793,12 +794,12 @@ process_one_sra <- function(sra_file) {
   if (!valid_fastq_pair(fnF, fnR)) {
     
     stop(
-      "FASTQ 转换结束，但没有找到完整的双端文件！"
+      "FASTQ conversion completed, but a complete paired-end file set was not found."
     )
     
   }
   
-  # Move legacy FASTQ files to the sample directory root.
+  # Move legacy subdirectory FASTQ files to the sample root
   for (f in c(fnF, fnR)) {
     
     root_normalized <- normalizePath(
@@ -824,7 +825,7 @@ process_one_sra <- function(sra_file) {
         overwrite = TRUE
       )) {
         
-        stop("无法将 FASTQ 移动到样本文件夹根目录！")
+        stop("Failed to move FASTQ files to the sample output directory root.")
         
       }
       
@@ -849,7 +850,7 @@ process_one_sra <- function(sra_file) {
   # 8.5 Quality filtering
   # ----------------------------------------------------------
   
-  cat("\n开始质量过滤...\n")
+  cat("\nStarting quality filtering...\n")
   
   filtF <- file.path(
     
@@ -873,7 +874,7 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  # Remove previous filtered files before processing.
+  # Remove previous filtered files to ensure a clean run
   unlink(
     c(filtF, filtR)
   )
@@ -900,10 +901,10 @@ process_one_sra <- function(sra_file) {
     
     compress = TRUE,
     
-    # Disable fork-based parallelization on Windows.
+    # Disable fork-based parallelism on Windows
     multithread = FILTER_MULTITHREAD,
     
-    # Enable OMP only for filterAndTrim.
+    # Apply OMP only to filterAndTrim
     OMP = FILTER_OMP,
     
     n = FILTER_CHUNK_SIZE,
@@ -912,7 +913,7 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  cat("\n质量过滤结果：\n")
+  cat("\nQuality-filtering results:\n")
   
   print(ft_out)
   
@@ -923,7 +924,7 @@ process_one_sra <- function(sra_file) {
     ft_out[1, "reads.out"] <= 0
   ) {
     
-    stop("质量过滤失败或没有剩余 reads！")
+    stop("Quality filtering failed or no reads remain.")
     
   }
   
@@ -932,7 +933,7 @@ process_one_sra <- function(sra_file) {
     !file.exists(filtR)
   ) {
     
-    stop("没有生成完整的过滤后 FASTQ 文件！")
+    stop("Complete filtered FASTQ files were not generated.")
     
   }
   
@@ -941,7 +942,7 @@ process_one_sra <- function(sra_file) {
   # 8.6 Learn forward error rates
   # ----------------------------------------------------------
   
-  cat("\n开始学习正向错误率...\n")
+  cat("\nLearning forward error rates...\n")
   
   errF <- dada2::learnErrors(
     
@@ -960,7 +961,7 @@ process_one_sra <- function(sra_file) {
   # 8.7 Learn reverse error rates
   # ----------------------------------------------------------
   
-  cat("\n开始学习反向错误率...\n")
+  cat("\nLearning reverse error rates...\n")
   
   errR <- dada2::learnErrors(
     
@@ -976,12 +977,12 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.8 Dereplicate FASTQ reads
+  # 8.8 FASTQ dereplication
   # ----------------------------------------------------------
   
-  cat("\n开始正向 FASTQ 去重复...\n")
+  cat("\nStarting forward FASTQ dereplication...\n")
   
-  # derepFastq does not accept an OMP argument.
+  # derepFastq does not support the OMP argument
   derepF <- dada2::derepFastq(
     
     filtF,
@@ -992,7 +993,7 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  cat("\n开始反向 FASTQ 去重复...\n")
+  cat("\nStarting reverse FASTQ dereplication...\n")
   
   derepR <- dada2::derepFastq(
     
@@ -1004,27 +1005,27 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  # Validate dereplication object classes.
+  # Validate returned object classes
   if (!inherits(derepF, "derep")) {
     
-    stop("正向 derepFastq 没有返回 derep 对象！")
+    stop("Forward derepFastq did not return a derep object.")
     
   }
   
   if (!inherits(derepR, "derep")) {
     
-    stop("反向 derepFastq 没有返回 derep 对象！")
+    stop("Reverse derepFastq did not return a derep object.")
     
   }
   
-  cat("\nFASTQ 去重复成功！\n")
+  cat("\nFASTQ dereplication completed successfully.\n")
   
   
   # ----------------------------------------------------------
-  # 8.9 Perform forward DADA2 denoising
+  # 8.9 Forward-read DADA2 denoising
   # ----------------------------------------------------------
   
-  cat("\n开始正向 DADA2 去噪...\n")
+  cat("\nStarting forward DADA2 denoising...\n")
   
   dadaF <- dada2::dada(
     
@@ -1040,16 +1041,16 @@ process_one_sra <- function(sra_file) {
   
   if (!inherits(dadaF, "dada")) {
     
-    stop("正向 DADA2 没有返回 dada 对象！")
+    stop("Forward DADA2 did not return a dada object.")
     
   }
   
   
   # ----------------------------------------------------------
-  # 8.10 Perform reverse DADA2 denoising
+  # 8.10 Reverse-read DADA2 denoising
   # ----------------------------------------------------------
   
-  cat("\n开始反向 DADA2 去噪...\n")
+  cat("\nStarting reverse DADA2 denoising...\n")
   
   dadaR <- dada2::dada(
     
@@ -1065,21 +1066,21 @@ process_one_sra <- function(sra_file) {
   
   if (!inherits(dadaR, "dada")) {
     
-    stop("反向 DADA2 没有返回 dada 对象！")
+    stop("Reverse DADA2 did not return a dada object.")
     
   }
   
-  cat("\n正反向 DADA2 去噪成功！\n")
+  cat("\nForward and reverse DADA2 denoising completed successfully.\n")
   
   
   # ----------------------------------------------------------
   # 8.11 Merge paired-end reads
   # ----------------------------------------------------------
   
-  cat("\n开始双端合并...\n")
+  cat("\nStarting paired-end merging...\n")
   
-  # Use the individual sample objects directly.
-  # mergePairs returns a data.frame for a single sample.
+  # Use a single-sample object
+  # mergePairs returns a data.frame
   
   merger <- dada2::mergePairs(
     
@@ -1101,14 +1102,14 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # Validate the mergePairs output.
+  # Validate the mergePairs return type
   # ----------------------------------------------------------
   
   if (!is.data.frame(merger)) {
     
     stop(
       paste(
-        "mergePairs 返回的数据类型不正确：",
+        "mergePairs returned an unexpected data type:",
         paste(class(merger), collapse = ", ")
       )
     )
@@ -1117,11 +1118,12 @@ process_one_sra <- function(sra_file) {
   
   if (!"abundance" %in% colnames(merger)) {
     
-    stop("mergePairs 结果中不存在 abundance 列！")
+    stop("The mergePairs result does not contain an abundance column.")
     
   }
   
-  # Sum the abundances of successfully merged reads.
+  # Sum reads from successfully merged pairs
+  # Avoid applying vapply to the data.frame
   
   total_merged <- sum(
     
@@ -1131,16 +1133,16 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  cat("\n双端合并统计：\n")
+  cat("\nPaired-end merging statistics:\n")
   
   cat(
-    "合并成功的 unique pairings：",
+    "Successfully merged unique pairings: ",
     nrow(merger),
     "\n"
   )
   
   cat(
-    "合并成功 reads：",
+    "Successfully merged reads: ",
     total_merged,
     "\n"
   )
@@ -1151,7 +1153,7 @@ process_one_sra <- function(sra_file) {
   ) * 100
   
   cat(
-    "双端合并成功率：",
+    "Paired-end merge rate: ",
     round(merge_rate, 2),
     "%\n"
   )
@@ -1163,11 +1165,11 @@ process_one_sra <- function(sra_file) {
     total_merged <= 0
   ) {
     
-    stop("双端合并没有产生有效 reads！")
+    stop("Paired-end merging produced no valid reads.")
     
   }
   
-  # Save the mergePairs result.
+  # Save the mergePairs output for downstream inspection
   saveRDS(
     
     merger,
@@ -1181,13 +1183,13 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.12 Construct the V3-V4 ASV table
+  # 8.12 Build the V3-V4 ASV table
   # ----------------------------------------------------------
   
-  cat("\n开始构建 V3-V4 ASV 表...\n")
+  cat("\nConstructing the V3-V4 ASV table...\n")
   
-  # makeSequenceTable requires a named list of merge results.
-  # Wrap the single-sample merge result in a named list.
+  # makeSequenceTable expects a list of sample-level merge results
+  # Wrap the single-sample merger in a list here
   
   merger_list <- setNames(
     
@@ -1207,16 +1209,16 @@ process_one_sra <- function(sra_file) {
     ncol(seqtab) == 0
   ) {
     
-    stop("V3-V4 ASV 表构建失败！")
+    stop("Failed to construct the V3-V4 ASV table.")
     
   }
   
   rownames(seqtab) <- sra_id
   
-  cat("\nV3-V4 ASV 表构建成功！\n")
+  cat("\nV3-V4 ASV table constructed successfully.\n")
   
   cat(
-    "V3-V4 ASV 数量：",
+    "Number of V3-V4 ASVs: ",
     ncol(seqtab),
     "\n"
   )
@@ -1237,7 +1239,7 @@ process_one_sra <- function(sra_file) {
   # 8.13 Remove chimeric sequences
   # ----------------------------------------------------------
   
-  cat("\n开始去除嵌合体...\n")
+  cat("\nRemoving chimeras...\n")
   
   seqtab.nochim <- dada2::removeBimeraDenovo(
     
@@ -1257,7 +1259,7 @@ process_one_sra <- function(sra_file) {
     ncol(seqtab.nochim) == 0
   ) {
     
-    stop("去除嵌合体后没有剩余 ASV！")
+    stop("No ASVs remained after chimera removal.")
     
   }
   
@@ -1282,16 +1284,16 @@ process_one_sra <- function(sra_file) {
     seqtab.nochim
   )
   
-  cat("\n去嵌合体成功！\n")
+  cat("\nChimera removal completed successfully.\n")
   
   cat(
-    "非嵌合 ASV 数量：",
+    "Number of non-chimeric ASVs: ",
     original_asv_count,
     "\n"
   )
   
   cat(
-    "非嵌合 reads：",
+    "Non-chimeric reads: ",
     nonchim_reads,
     "\n"
   )
@@ -1301,7 +1303,7 @@ process_one_sra <- function(sra_file) {
   # 8.14 Extract the V4 region
   # ----------------------------------------------------------
   
-  cat("\n开始提取统一 V4 区域...\n")
+  cat("\nExtracting the standardized V4 region...\n")
   
   v3v4_sequences <- colnames(
     seqtab.nochim
@@ -1329,19 +1331,19 @@ process_one_sra <- function(sra_file) {
     
     stop(
       paste(
-        "所有 ASV 均未能提取 V4。",
-        "请检查实际扩增引物和 V4 定位引物。"
+        "V4 extraction failed for all ASVs.",
+        "Check the amplification primers and V4 extraction primers."
       )
     )
     
   }
   
-  # Calculate the ASV-level extraction rate.
+  # ASV-level extraction success rate
   v4_asv_success_rate <- mean(
     v4_success
   ) * 100
   
-  # Calculate the read-weighted V4 retention rate.
+  # Read-weighted V4 retention rate
   v4_retained_reads <- sum(
     
     seqtab.nochim[
@@ -1357,28 +1359,28 @@ process_one_sra <- function(sra_file) {
       nonchim_reads
   ) * 100
   
-  cat("\nV4 提取统计：\n")
+  cat("\nV4 extraction statistics:\n")
   
   cat(
-    "原始 V3-V4 ASV：",
+    "Original V3-V4 ASVs: ",
     original_asv_count,
     "\n"
   )
   
   cat(
-    "成功提取 V4 的 ASV：",
+    "ASVs with successfully extracted V4 regions: ",
     sum(v4_success),
     "\n"
   )
   
   cat(
-    "ASV 提取成功率：",
+    "ASV extraction success rate: ",
     round(v4_asv_success_rate, 2),
     "%\n"
   )
   
   cat(
-    "V4 reads 保留率：",
+    "V4 read retention rate: ",
     round(v4_retention, 2),
     "%\n"
   )
@@ -1388,9 +1390,9 @@ process_one_sra <- function(sra_file) {
     warning(
       paste0(
         sra_id,
-        " V4 reads 保留率低于 ",
+        " V4 read retention is below ",
         V4_WARNING_RETENTION,
-        "%，建议检查引物定位。"
+        "%; verify primer matching."
       )
     )
     
@@ -1450,7 +1452,7 @@ process_one_sra <- function(sra_file) {
   # 8.16 Collapse identical V4 sequences
   # ----------------------------------------------------------
   
-  cat("\n开始合并相同 V4 序列...\n")
+  cat("\nCollapsing identical V4 sequences...\n")
   
   asv_counts_kept <- t(
     
@@ -1462,7 +1464,7 @@ process_one_sra <- function(sra_file) {
     
   )
   
-  # Sum counts for ASVs sharing an identical V4 sequence.
+  # Sum read counts across ASVs sharing the same V4 sequence
   v4_collapsed <- rowsum(
     
     asv_counts_kept,
@@ -1490,11 +1492,11 @@ process_one_sra <- function(sra_file) {
   )
   
   if (ncol(v4_seqtab) == 0) {
-    stop("合并相同 V4 序列后没有 ASV！")
+    stop("No ASVs remained after collapsing identical V4 sequences.")
   }
   
   cat(
-    "\n最终 V4 ASV 数量：",
+    "\nFinal V4 ASV count: ",
     ncol(v4_seqtab),
     "\n"
   )
@@ -1512,7 +1514,7 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.17 Assign standardized V4 ASV identifiers
+  # 8.17 Generate standardized V4 ASV identifiers
   # ----------------------------------------------------------
   
   v4_ids <- paste0(
@@ -1528,7 +1530,7 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.18 Construct the V4 ASV abundance matrix
+  # 8.18 Build the V4 ASV abundance matrix
   # ----------------------------------------------------------
   
   v4_count_matrix <- t(
@@ -1544,7 +1546,7 @@ process_one_sra <- function(sra_file) {
   # 8.19 Export the PICRUSt2 FASTA file
   # ----------------------------------------------------------
   
-  cat("\n生成 PICRUSt2 FASTA...\n")
+  cat("\nGenerating the PICRUSt2 FASTA file...\n")
   
   fasta_set <- DNAStringSet(
     v4_unique_sequences
@@ -1567,10 +1569,10 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.20 Export the PICRUSt2 abundance table
+  # 8.20 Export the PICRUSt2 abundance TSV
   # ----------------------------------------------------------
   
-  cat("\n生成 PICRUSt2 abundance TSV...\n")
+  cat("\nGenerating the PICRUSt2 abundance TSV...\n")
   
   picrust_abundance <- data.frame(
     
@@ -1609,7 +1611,7 @@ process_one_sra <- function(sra_file) {
   # 8.21 Assign taxonomy using SILVA v138.2
   # ----------------------------------------------------------
   
-  cat("\n开始 SILVA v138.2 分类注释...\n")
+  cat("\nAssigning taxonomy with SILVA v138.2...\n")
   
   v4_taxa <- dada2::assignTaxonomy(
     
@@ -1632,7 +1634,7 @@ process_one_sra <- function(sra_file) {
     nrow(v4_taxa) != length(v4_unique_sequences)
   ) {
     
-    stop("SILVA 分类注释失败！")
+    stop("SILVA taxonomic assignment failed.")
     
   }
   
@@ -1649,14 +1651,14 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.22 Construct the V4 ASV taxonomy table
+  # 8.22 Build the V4 ASV taxonomy table
   # ----------------------------------------------------------
   
-  cat("\n构建 V4 ASV taxonomy table...\n")
+  cat("\nConstructing the V4 ASV taxonomy table...\n")
   
   if (is.null(rownames(v4_taxa))) {
     
-    stop("分类注释结果缺少序列行名！")
+    stop("The taxonomy results are missing sequence row names.")
     
   }
   
@@ -1670,7 +1672,7 @@ process_one_sra <- function(sra_file) {
   
   if (anyNA(taxa_index)) {
     
-    stop("分类注释结果与 V4 ASV 序列无法匹配！")
+    stop("The taxonomy results could not be matched to the V4 ASV sequences.")
     
   }
   
@@ -1692,8 +1694,8 @@ process_one_sra <- function(sra_file) {
   
   rownames(taxa_df) <- NULL
   
-  # Store the representative V4 sequence in the first column.
-  # Retain ASV_ID values for matching PICRUSt2 inputs.
+  # Store the representative V4 sequence in the first column
+  # Retain ASV_ID for correspondence with PICRUSt2 files
   
   final_table <- data.frame(
     
@@ -1729,14 +1731,14 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.23 Aggregate genus-level abundance
+  # 8.23 Summarize genus-level abundance
   # ----------------------------------------------------------
   
-  cat("\n开始属水平丰度汇总...\n")
+  cat("\nSummarizing genus-level abundance...\n")
   
   if (!"Genus" %in% colnames(taxa_match)) {
     
-    stop("SILVA 注释结果没有 Genus 列！")
+    stop("The SILVA taxonomy results do not contain a Genus column.")
     
   }
   
@@ -1780,7 +1782,7 @@ process_one_sra <- function(sra_file) {
     
   }
   
-  # Aggregate ASV read counts by genus.
+  # Aggregate read counts for ASVs assigned to the same genus
   genus_matrix <- rowsum(
     
     v4_count_matrix,
@@ -1838,7 +1840,7 @@ process_one_sra <- function(sra_file) {
   # 8.24 Calculate genus-level relative abundance
   # ----------------------------------------------------------
   
-  cat("\n计算属水平相对丰度...\n")
+  cat("\nCalculating genus-level relative abundance...\n")
   
   genus_totals <- colSums(
     genus_matrix
@@ -1846,7 +1848,7 @@ process_one_sra <- function(sra_file) {
   
   if (any(genus_totals <= 0)) {
     
-    stop("属水平丰度总数为0，无法计算相对丰度！")
+    stop("Total genus-level abundance is zero; relative abundance cannot be calculated.")
     
   }
   
@@ -1895,7 +1897,7 @@ process_one_sra <- function(sra_file) {
   # 8.25 Summarize DADA2 read counts
   # ----------------------------------------------------------
   
-  cat("\n生成 reads 统计表...\n")
+  cat("\nGenerating the read-tracking table...\n")
   
   denoised_F <- sum(
     dada2::getUniques(dadaF)
@@ -1958,10 +1960,10 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.26 Save the complete analysis results
+  # 8.26 Save complete analysis results
   # ----------------------------------------------------------
   
-  cat("\n保存完整分析结果...\n")
+  cat("\nSaving the complete analysis results...\n")
   
   complete_results <- list(
     
@@ -2013,7 +2015,7 @@ process_one_sra <- function(sra_file) {
   
   if (!KEEP_INTERMEDIATE_FILES) {
     
-    cat("\n清理中间 FASTQ 文件...\n")
+    cat("\nRemoving intermediate FASTQ files...\n")
     
     intermediate_files <- c(
       
@@ -2043,7 +2045,7 @@ process_one_sra <- function(sra_file) {
   
   
   # ----------------------------------------------------------
-  # 8.28 Write the completion marker
+  # 8.28 Write the success marker
   # ----------------------------------------------------------
   
   writeLines(
@@ -2081,27 +2083,27 @@ process_one_sra <- function(sra_file) {
   
   cat("====================================================\n")
   
-  cat("样本处理成功：", sra_id, "\n")
+  cat("Sample processed successfully: ", sra_id, "\n")
   
-  cat("双端合并 reads：", total_merged, "\n")
+  cat("Paired-end merged reads: ", total_merged, "\n")
   
-  cat("V3-V4 ASV：", original_asv_count, "\n")
+  cat("V3-V4 ASV count: ", original_asv_count, "\n")
   
-  cat("V4 ASV：", ncol(v4_seqtab), "\n")
+  cat("V4 ASV count: ", ncol(v4_seqtab), "\n")
   
   cat(
-    "V4 reads 保留率：",
+    "V4 read retention rate: ",
     round(v4_retention, 2),
     "%\n"
   )
   
   cat(
-    "属数量：",
+    "Number of genera: ",
     nrow(genus_matrix),
     "\n"
   )
   
-  cat("结果目录：", sample_dir, "\n")
+  cat("Output directory: ", sample_dir, "\n")
   
   cat("====================================================\n")
   
@@ -2130,7 +2132,7 @@ process_one_sra <- function(sra_file) {
       
       output_dir = sample_dir,
       
-      message = "处理成功"
+      message = "Processing completed successfully."
       
     )
     
@@ -2143,7 +2145,7 @@ process_one_sra <- function(sra_file) {
 # 9. Discover all SRA files
 # ============================================================
 
-cat("\n开始搜索 SRA 文件...\n")
+cat("\nSearching for SRA files...\n")
 
 sra_files <- list.files(
   
@@ -2161,7 +2163,7 @@ sra_files <- list.files(
 
 if (length(sra_files) == 0) {
   
-  stop("没有找到 SRA 文件！")
+  stop("No SRA files were found.")
   
 }
 
@@ -2176,14 +2178,14 @@ sra_files <- normalizePath(
 )
 
 cat(
-  "\n找到 SRA 文件：",
+  "\nNumber of SRA files found: ",
   length(sra_files),
   "\n"
 )
 
 
 # ============================================================
-# 10. Configure single-sample mode
+# 10. Single-sample test mode
 # ============================================================
 
 if (TEST_ONLY) {
@@ -2200,7 +2202,7 @@ if (TEST_ONLY) {
     
     stop(
       paste(
-        "测试样本没有找到或存在重复：",
+        "The test sample was not found or its ID is not unique:",
         TEST_SRA_ID
       )
     )
@@ -2209,17 +2211,17 @@ if (TEST_ONLY) {
   
   sra_files <- sra_files[selected]
   
-  cat("\n当前为单样本测试模式！\n")
+  cat("\nSingle-sample test mode is enabled.\n")
   
   cat(
-    "测试文件：",
+    "Test file: ",
     basename(sra_files),
     "\n"
   )
   
 } else {
   
-  cat("\n当前为全部 SRA 批处理模式！\n")
+  cat("\nBatch processing mode is enabled for all SRA files.\n")
   
 }
 
@@ -2355,7 +2357,7 @@ for (i in seq_along(sra_files)) {
   cat("####################################################\n")
   
   cat(
-    "当前进度：",
+    "Current progress: ",
     i,
     "/",
     length(sra_files),
@@ -2363,7 +2365,7 @@ for (i in seq_along(sra_files)) {
   )
   
   cat(
-    "当前文件：",
+    "Current file: ",
     basename(current_sra),
     "\n"
   )
@@ -2372,7 +2374,7 @@ for (i in seq_along(sra_files)) {
   
   
   # ----------------------------------------------------------
-  # Isolate failures at the sample level.
+  # Isolate errors at the sample level
   # ----------------------------------------------------------
   
   result <- tryCatch(
@@ -2402,11 +2404,11 @@ for (i in seq_along(sra_files)) {
         
       )
       
-      cat("\n处理失败：", current_id, "\n")
+      cat("\nProcessing failed: ", current_id, "\n")
       
-      cat("错误信息：", error_message, "\n")
+      cat("Error details: ", error_message, "\n")
       
-      # Record the error call stack.
+      # Save the error call stack
       calls <- sys.calls()
       
       trace_text <- vapply(
@@ -2481,7 +2483,7 @@ for (i in seq_along(sra_files)) {
   
   
   # ----------------------------------------------------------
-  # Calculate elapsed processing time.
+  # Calculate elapsed time
   # ----------------------------------------------------------
   
   elapsed_seconds <- as.numeric(
@@ -2500,7 +2502,7 @@ for (i in seq_along(sra_files)) {
   
   
   # ----------------------------------------------------------
-  # Assemble the current sample summary row.
+  # Build the current sample summary row
   # ----------------------------------------------------------
   
   result_row <- data.frame(
@@ -2538,7 +2540,7 @@ for (i in seq_along(sra_files)) {
   
   
   # ----------------------------------------------------------
-  # Update the batch summary table.
+  # Update the batch summary table
   # ----------------------------------------------------------
   
   existing <- which(
@@ -2549,7 +2551,8 @@ for (i in seq_along(sra_files)) {
     
   )
   
-  # Preserve existing summary records for completed samples.
+  # Preserve existing records for completed samples that are skipped
+  # Retain the prior summary entry when one is already available
   
   if (
     result$status != "SKIPPED_COMPLETE" ||
@@ -2578,7 +2581,7 @@ for (i in seq_along(sra_files)) {
     
   }
   
-  # Save the summary after each sample.
+  # Save the summary after each sample
   write.csv(
     
     old_summary,
@@ -2592,16 +2595,16 @@ for (i in seq_along(sra_files)) {
   )
   
   
-  cat("\n当前样本状态：", result$status, "\n")
+  cat("\nCurrent sample status: ", result$status, "\n")
   
   cat(
-    "处理耗时：",
+    "Elapsed time: ",
     round(elapsed_seconds / 60, 2),
-    "分钟\n"
+    " minutes\n"
   )
   
   cat(
-    "已完成进度：",
+    "Completed progress: ",
     i,
     "/",
     length(sra_files),
@@ -2612,7 +2615,7 @@ for (i in seq_along(sra_files)) {
 
 
 # ============================================================
-# 13. Generate the final batch summary
+# 13. Final batch summary
 # ============================================================
 
 write.csv(
@@ -2656,20 +2659,20 @@ cat("\n")
 
 cat("####################################################\n")
 
-cat("             SRA 批处理结束！\n")
+cat("             SRA batch processing completed!\n")
 
 cat("####################################################\n")
 
-cat("\n本次处理文件数量：", length(sra_files), "\n")
+cat("\nNumber of files processed in this run: ", length(sra_files), "\n")
 
-cat("成功：", success_count, "\n")
+cat("Successful: ", success_count, "\n")
 
-cat("跳过：", skipped_count, "\n")
+cat("Skipped: ", skipped_count, "\n")
 
-cat("失败：", failed_count, "\n")
+cat("Failed: ", failed_count, "\n")
 
-cat("\n汇总文件：\n")
+cat("\nSummary file:\n")
 
 cat(summary_file, "\n")
 
-cat("\n全部任务结束！\n")
+cat("\nAll tasks completed!\n")
